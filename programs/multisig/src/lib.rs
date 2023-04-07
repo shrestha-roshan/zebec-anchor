@@ -1,5 +1,5 @@
 //! The program is used from https://github.com/coral-xyz/multisig which provides
-//! Grant of Copyright License 
+//! Grant of Copyright License
 //! We want to thank all the contributors of coral-xyz/multisig
 //! This program can be used to allow a multisig to govern anything a regular
 //! Pubkey can govern. One can use the multisig as a BPF program upgrade
@@ -17,8 +17,7 @@
 //! To sign, owners should invoke the `approve` instruction, and finally,
 //! the `execute_transaction`, once enough (i.e. `threshold`) of the owners have
 //! signed.
-//! 
-
+//!
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
@@ -47,10 +46,10 @@ pub mod serum_multisig {
         require!(!owners.is_empty(), InvalidOwnersLen);
 
         let multisig = &mut ctx.accounts.multisig;
-        multisig.owners = owners;//vector of publickey
-        multisig.threshold = threshold;//8
-        multisig.nonce = nonce;//1
-        multisig.owner_set_seqno = 0;//4
+        multisig.owners = owners; //vector of publickey
+        multisig.threshold = threshold; //8
+        multisig.nonce = nonce; //1
+        multisig.owner_set_seqno = 0; //4
         Ok(())
     }
     // Creates a new transaction account, automatically signed by the creator,
@@ -84,8 +83,7 @@ pub mod serum_multisig {
         Ok(())
     }
     // Approves a transaction on behalf of an owner of the multisig.
-    pub fn approve(ctx: Context<Approve>)
-     -> Result<()> {
+    pub fn approve(ctx: Context<Approve>) -> Result<()> {
         let owner_index = ctx
             .accounts
             .multisig
@@ -94,9 +92,10 @@ pub mod serum_multisig {
             .position(|a| a == ctx.accounts.owner.key)
             .ok_or(ErrorCode::InvalidOwner)?;
         /*if ctx.accounts.transaction.signers[owner_index]==true
-        {        
+        {
             return Err(ErrorCode::AlreadyApproved.into());
-        }*/ //as recommended by RGB sir
+        }*/
+        //as recommended by RGB sir
         ctx.accounts.transaction.signers[owner_index] = true;
         Ok(())
     }
@@ -105,8 +104,7 @@ pub mod serum_multisig {
         ctx: Context<'_, '_, '_, 'info, Auth<'info>>,
         owners: Vec<Pubkey>,
         threshold: u64,
-    ) -> Result<()> 
-    {
+    ) -> Result<()> {
         set_owners(
             Context::new(
                 ctx.program_id,
@@ -120,8 +118,7 @@ pub mod serum_multisig {
     }
     // Sets the owners field on the multisig. The only way this can be invoked
     // is via a recursive call from execute_transaction -> set_owners.
-    pub fn set_owners(ctx: Context<Auth>, owners: Vec<Pubkey>) -> Result<()> 
-    {
+    pub fn set_owners(ctx: Context<Auth>, owners: Vec<Pubkey>) -> Result<()> {
         assert_unique_owners(&owners)?;
         require!(!owners.is_empty(), InvalidOwnersLen);
 
@@ -139,8 +136,7 @@ pub mod serum_multisig {
     // Changes the execution threshold of the multisig. The only way this can be
     // invoked is via a recursive call from execute_transaction ->
     // change_threshold.
-    pub fn change_threshold(ctx: Context<Auth>, threshold: u64) -> Result<()> 
-    {
+    pub fn change_threshold(ctx: Context<Auth>, threshold: u64) -> Result<()> {
         require!(threshold > 0, InvalidThreshold);
         if threshold > ctx.accounts.multisig.owners.len() as u64 {
             return Err(ErrorCode::InvalidThreshold.into());
@@ -150,8 +146,7 @@ pub mod serum_multisig {
         Ok(())
     }
     // Executes the given transaction if threshold owners have signed it.
-    pub fn execute_transaction(ctx: Context<ExecuteTransaction>) -> Result<()>
-    {
+    pub fn execute_transaction(ctx: Context<ExecuteTransaction>) -> Result<()> {
         // Has this been executed already?
         if ctx.accounts.transaction.did_execute {
             return Err(ErrorCode::AlreadyExecuted.into());
@@ -193,16 +188,46 @@ pub mod serum_multisig {
 
         Ok(())
     }
+
+    pub fn create_request(ctx: Context<CreateRequest>, actions: Vec<RequestAction>) -> Result<()> {
+        let multisig = &ctx.accounts.multisig;
+
+        let owner_index = multisig
+            .owners
+            .iter()
+            .position(|a| a == ctx.accounts.proposer.key)
+            .ok_or(ErrorCode::InvalidOwner)?;
+
+        let owners_len = multisig.owners.len();
+        let owner_set_seqno = multisig.owner_set_seqno;
+
+        let request = &mut ctx.accounts.request;
+        request.apply_request(multisig.key(), actions, owner_set_seqno, owners_len);
+        request.approve(owner_index);
+
+        Ok(())
+    }
+
+    // Approves a request on behalf of an owner of the multisig.
+    pub fn approve_request(ctx: Context<ApproveRequest>) -> Result<()> {
+        let owner_index = ctx
+            .accounts
+            .multisig
+            .owners
+            .iter()
+            .position(|a| a == ctx.accounts.owner.key)
+            .ok_or(ErrorCode::InvalidOwner)?;
+        ctx.accounts.request.approve(owner_index);
+        Ok(())
+    }
 }
 #[derive(Accounts)]
-pub struct CreateMultisig<'info> 
-{
+pub struct CreateMultisig<'info> {
     #[account(zero, signer)]
     multisig: Box<Account<'info, Multisig>>,
 }
 #[derive(Accounts)]
-pub struct CreateTransaction<'info> 
-{
+pub struct CreateTransaction<'info> {
     multisig: Box<Account<'info, Multisig>>,
     #[account(zero, signer)]
     transaction: Box<Account<'info, Transaction>>,
@@ -210,8 +235,7 @@ pub struct CreateTransaction<'info>
     proposer: Signer<'info>,
 }
 #[derive(Accounts)]
-pub struct Approve<'info>
-{
+pub struct Approve<'info> {
     #[account(constraint = multisig.owner_set_seqno == transaction.owner_set_seqno)]
     multisig: Box<Account<'info, Multisig>>,
     #[account(mut, has_one = multisig)]
@@ -220,8 +244,7 @@ pub struct Approve<'info>
     owner: Signer<'info>,
 }
 #[derive(Accounts)]
-pub struct Auth<'info>
-{
+pub struct Auth<'info> {
     #[account(mut)]
     multisig: Box<Account<'info, Multisig>>,
     #[account(
@@ -231,8 +254,7 @@ pub struct Auth<'info>
     multisig_signer: Signer<'info>,
 }
 #[derive(Accounts)]
-pub struct ExecuteTransaction<'info> 
-{
+pub struct ExecuteTransaction<'info> {
     #[account(constraint = multisig.owner_set_seqno == transaction.owner_set_seqno)]
     multisig: Box<Account<'info, Multisig>>,
     /// CHECK: multisig_signer is a PDA program signer. Data is never read or written to
@@ -244,9 +266,63 @@ pub struct ExecuteTransaction<'info>
     #[account(mut, has_one = multisig)]
     transaction: Box<Account<'info, Transaction>>,
 }
+
+#[derive(Accounts)]
+pub struct CreateRequest<'info> {
+    pub multisig: Box<Account<'info, Multisig>>,
+    #[account(mut, has_one = multisig)]
+    pub request: Box<Account<'info, Request>>,
+    pub proposer: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct ApproveRequest<'info> {
+    #[account(constraint = multisig.owner_set_seqno == request.owner_set_seqno)]
+    multisig: Box<Account<'info, Multisig>>,
+    #[account(mut, has_one = multisig)]
+    request: Box<Account<'info, Request>>,
+    // One of the multisig owners. Checked in the handler.
+    owner: Signer<'info>,
+}
+
 #[account]
-pub struct Multisig 
-{
+pub struct Request {
+    pub multisig: Pubkey,
+    pub actions: Vec<RequestAction>,
+    pub signers: Vec<bool>,
+    pub did_execute: bool,
+    pub owner_set_seqno: u32,
+}
+
+impl Request {
+    pub fn apply_request(
+        &mut self,
+        multisig: Pubkey,
+        actions: Vec<RequestAction>,
+        owner_set_seqno: u32,
+        owner_len: usize,
+    ) {
+        self.multisig = multisig;
+        self.actions = actions;
+        self.did_execute = false;
+        self.owner_set_seqno = owner_set_seqno;
+        self.signers = Vec::new();
+        self.signers.resize(owner_len, false);
+    }
+
+    pub fn approve(&mut self, index: usize) {
+        self.signers[index] = true;
+    }
+}
+
+#[derive(Clone, AnchorSerialize, AnchorDeserialize)]
+pub struct RequestAction {
+    pub program_id: Pubkey,
+    pub accounts: Vec<TransactionAccount>,
+    pub data: Vec<u8>,
+}
+
+#[account]
+pub struct Multisig {
     pub owners: Vec<Pubkey>,
     pub threshold: u64,
     pub nonce: u8,
