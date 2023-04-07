@@ -29,6 +29,10 @@ declare_id!("b6ZPysThkApNx2YDiGsPUiYPE7Ub1kTRdCWp7gBkzbr");
 
 #[program]
 pub mod serum_multisig {
+    use std::collections::HashSet;
+
+    use anchor_lang::solana_program::program::invoke_signed;
+
     use super::*;
 
     // Initializes a new multisig account with a set of owners and a threshold.
@@ -220,6 +224,63 @@ pub mod serum_multisig {
         ctx.accounts.request.approve(owner_index);
         Ok(())
     }
+
+    pub fn execute_request(ctx: Context<ExecuteRequest>) -> Result<()> {
+        if ctx.accounts.request.did_execute {
+            return Err(ErrorCode::AlreadyExecuted.into());
+        }
+
+        // Do we have enough signers.
+        let sig_count = ctx
+            .accounts
+            .request
+            .signers
+            .iter()
+            .filter(|&did_sign| *did_sign)
+            .count() as u64;
+
+        if sig_count < ctx.accounts.multisig.threshold {
+            return Err(ErrorCode::NotEnoughSigners.into());
+        }
+
+        let request = &ctx.accounts.request;
+        let multisig_signer = ctx.accounts.multisig_signer.key;
+
+        for action in request.clone().actions.iter() {
+            let mut metas = action.get_account_metas();
+            let mut unique_pubkeys: HashSet<Pubkey> = HashSet::new();
+
+            for meta in &mut metas {
+                unique_pubkeys.insert(meta.pubkey.clone());
+
+                if meta.pubkey.eq(multisig_signer) {
+                    meta.is_signer = true;
+                }
+            }
+
+            let ix = Instruction {
+                program_id: action.program_id,
+                accounts: metas,
+                data: action.data.clone(),
+            };
+            let multisig_key = ctx.accounts.multisig.key();
+            let seeds = &[multisig_key.as_ref(), &[ctx.accounts.multisig.nonce]];
+            let signer = &[&seeds[..]];
+            let account_infos = unique_pubkeys
+                .iter()
+                .map(|pubkey| -> AccountInfo {
+                    ctx.remaining_accounts
+                        .iter()
+                        .find(|&account| account.key().eq(pubkey))
+                        .unwrap()
+                        .clone()
+                })
+                .collect::<Vec<AccountInfo>>();
+            invoke_signed(&ix, &account_infos, signer)?;
+        }
+        ctx.accounts.request.did_execute = true;
+        Ok(())
+    }
 }
 #[derive(Accounts)]
 pub struct CreateMultisig<'info> {
@@ -284,6 +345,20 @@ pub struct ApproveRequest<'info> {
     owner: Signer<'info>,
 }
 
+#[derive(Accounts)]
+pub struct ExecuteRequest<'info> {
+    #[account(constraint = multisig.owner_set_seqno == request.owner_set_seqno)]
+    multisig: Box<Account<'info, Multisig>>,
+    /// CHECK: multisig_signer is a PDA program signer. Data is never read or written to
+    #[account(
+        seeds = [multisig.key().as_ref()],
+        bump = multisig.nonce,
+    )]
+    multisig_signer: UncheckedAccount<'info>,
+    #[account(mut, has_one = multisig)]
+    request: Box<Account<'info, Request>>,
+}
+
 #[account]
 pub struct Request {
     pub multisig: Pubkey,
@@ -319,6 +394,15 @@ pub struct RequestAction {
     pub program_id: Pubkey,
     pub accounts: Vec<TransactionAccount>,
     pub data: Vec<u8>,
+}
+
+impl RequestAction {
+    pub fn get_account_metas(&self) -> Vec<AccountMeta> {
+        self.accounts
+            .iter()
+            .map(|item| AccountMeta::from(item))
+            .collect()
+    }
 }
 
 #[account]
